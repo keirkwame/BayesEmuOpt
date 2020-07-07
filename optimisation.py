@@ -51,7 +51,11 @@ def map_from_unit_cube_list(param_vec_list, param_limits):
 
 
 class OptimisationClass:
-    """Class to contain Bayesian optimisation computations."""
+    """Class to contain Bayesian emulator optimisation computations.
+        get_objective [function([n_params]) --> scalar] - this is usually the ln posterior. ln prior can be sensible
+        get_emulator_error [function([n_params]) --> array([n_data])] - return emulator error vector
+        param_limits [n_params, 2 (lower, upper)] - limits of prior volume
+        inverse_data_covariance [n_data, n_data] - inverse of data covariance matrix"""
     def __init__(self, get_objective, get_emulator_error, param_limits, inverse_data_covariance):
         self.get_objective = get_objective
         self.get_emulator_error = get_emulator_error
@@ -60,6 +64,7 @@ class OptimisationClass:
 
     def exploration_weight_GP_UCB(self, nu, delta=0.5):
         """Choose the exploration weight for the GP-UCB acquisition function."""
+        assert nu >= 0.
         assert 0. < delta < 1.
         return np.sqrt(nu * 2. * np.log((np.pi ** 2.) / 3. / delta))
 
@@ -87,7 +92,7 @@ class OptimisationClass:
             raise ValueError('Unsupported acquisition function.')
 
         if bounds == 'default':
-            bounds = [(0.05, 0.95) for i in range(params_start.shape[0])]
+            bounds = [(0.05, 0.95) for _ in range(self.param_limits.shape[0])]
 
         if params_start == 'default':
             params_start = np.ones(self.param_limits.shape[0]) * 0.5
@@ -99,7 +104,20 @@ class OptimisationClass:
 
     def make_proposal(self, params_start='default', nu=0.19, std_dev=None, acquisition='GP_UCB', bounds='default',
                       method='TNC', **kwargs):
-        """Make a proposal for the next optimisation point."""
+        """Make a proposal for the next optimisation point.
+            params_start [n_params] - initialisation for optimisation of acquisition function. Maximum posterior is
+                            usually a good place to start for quick convergence but we recommend varying this to ensure
+                            parameter space is fully explored. Defaults to mid-point of prior volume
+            nu - hyper-parameter that sets relative balance between exploitation and exploration. Set higher to increase
+                    exploration. We recommend varying this to get a sensible balance
+            std_dev [n_params] - standard deviation for random exploration displacement. We recommend setting this to
+                                    previous estimate for 1D marginalised 1 sigma constraints
+            acquisition - only GP-UCB implemented at the moment
+            bounds [n_params, tuple(lower, upper)] - in unit hypercube. Bounds for acquisition function maximisation.
+                                                    Defaults to excluding outer 5% to account for Gaussian process error
+                                                    exploding outside training set
+            method - method for optimisation of acquisition function. See scipy.optimize.minimize. Defaults to truncated
+                        Newton method"""
         if std_dev == None:
             displacement = np.zeros(self.param_limits.shape[0])
         else:
